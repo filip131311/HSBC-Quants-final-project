@@ -1,0 +1,48 @@
+---
+title: "hsbc2"
+author: "Ola"
+date: "2025-01-01"
+output: html_document
+---
+```{r}
+library(dplyr)
+library(ggplot2)
+library(MASS)
+```
+
+```{r}
+data <- readxl::read_excel("C:/Users/Ola/Desktop/HSBC.xlsx")
+str(data)
+attach(data)
+clean_data <- na.omit(data)
+GROUP_FLAG <- factor(GROUP_FLAG)
+DEFAULT_FLAG <- factor(DEFAULT_FLAG)
+`dummy 2008`<- factor(`dummy 2008`)
+unique(clean_data$INDUSTRY)
+```
+
+```{r}
+log_reg1 <- glm(DEFAULT_FLAG~., data=clean_data, family="binomial")
+summary(log_reg1)
+clean_data[clean_data$ASSESSMENT_YEAR==2008 & clean_data$DEFAULT_FLAG=="1",]  #429
+clean_data[clean_data$ASSESSMENT_YEAR==2008 & clean_data$DEFAULT_FLAG=="0",] #1643
+View(clean_data)
+clean_data %>% count(clean_data$CUSTOMER_ID)
+clean_data[clean_data$CUSTOMER_ID==199609,]
+clean_data[clean_data$CUSTOMER_ID==190937,]
+clean_data %>%
+  group_by(ASSESSMENT_YEAR, DEFAULT_FLAG) %>%
+  summarise(count = n(), .groups = "drop") 
+clean_data %>%
+  group_by(ASSESSMENT_YEAR) %>%
+  summarise(
+    total_obs = n(),                         # Całkowita liczba obserwacji w roku
+    ones_count = sum(DEFAULT_FLAG == "1"),        # Liczba jedynek dla danego roku
+    proportion_ones = ones_count / total_obs # Udział jedynek w danym roku
+  ) %>% ggplot(aes(x=ASSESSMENT_YEAR, y=proportion_ones)) + geom_col()  #dlatego właśnie wprowadziliśmy dummy 2008
+
+```
+```{r}
+stepAIC(log_reg1,direction = "both")
+```
+
