@@ -11,15 +11,26 @@ library(MASS)
 ```
 
 ```{r}
-data <- readxl::read_excel("./DataForProject.xlsx")
+data <- readxl::read_excel("~/Documents/studia/HSBC-Quants-final-project/DataForProject.xls")
 str(data)
-attach(data)
 clean_data <- na.omit(data)
-GROUP_FLAG <- factor(GROUP_FLAG)
-DEFAULT_FLAG <- factor(DEFAULT_FLAG)
-`dummy 2008`<- factor(`dummy 2008`)
+clean_data$WAS_TAKEN_IN_2008 <- ifelse(clean_data$ASSESSMENT_YEAR == "2008", 1, 0)
+clean_data <- clean_data %>%
+  group_by(CUSTOMER_ID) %>%
+  mutate(NUMBER_OF_LOANS = n()) %>%
+  ungroup()
+#clean_data <- clean_data %>%
+ # group_by(CUSTOMER_ID) %>% 
+#  mutate(NUMBER_OF_PAID = sum(DEFAULT_FLAG == 0, na.rm = TRUE)) %>% 
+ # ungroup()
+#clean_data$PAID_TO_TAKEN <- clean_data$NUMBER_OF_PAID / clean_data$NUMBER_OF_LOANS
+GROUP_FLAG <- factor(clean_data$GROUP_FLAG)
+DEFAULT_FLAG <- factor(clean_data$DEFAULT_FLAG)
+WAS_TAKEN_IN_2008<- factor(clean_data$WAS_TAKEN_IN_2008)
 unique(clean_data$INDUSTRY)
+
 ```
+
 
 ```{r}
 log_reg1 <- glm(DEFAULT_FLAG~., data=clean_data, family="binomial")
@@ -28,7 +39,7 @@ clean_data[clean_data$ASSESSMENT_YEAR==2008 & clean_data$DEFAULT_FLAG=="1",]  #4
 clean_data[clean_data$ASSESSMENT_YEAR==2008 & clean_data$DEFAULT_FLAG=="0",] #1643
 View(clean_data)
 clean_data %>% count(clean_data$CUSTOMER_ID)
-clean_data[clean_data$CUSTOMER_ID==199609,]
+clean_data[clean_data$CUSTOMER_ID==199609,] 
 clean_data[clean_data$CUSTOMER_ID==190937,]
 clean_data %>%
   group_by(ASSESSMENT_YEAR, DEFAULT_FLAG) %>%
@@ -43,6 +54,40 @@ clean_data %>%
 
 ```
 ```{r}
+-2*logLik(log_reg1) #dewiancja wynosi 1690,916
+```
+```{r}
 stepAIC(log_reg1,direction = "both")
+```
+
+```{r}
+log_reg2 <- glm(DEFAULT_FLAG~.-ASSESSMENT_YEAR, data=clean_data, family="binomial")
+summary(log_reg2)
+step(log_reg2, direction="both")
+step(log_reg2, direction="both", k=log(nrow(clean_data)))
+-2*logLik(log_reg2)
+
+```
+```{r}
+#korelacja miedzy zmiennymi
+cor_matrix <- cor(clean_data[, sapply(clean_data, is.numeric)], use = "complete.obs")
+print(cor_matrix)
+
+# macierzy korelacji
+corrplot(cor_matrix, method = "circle", type = "upper", tl.col = "black")
+```
+```{r}
+#porównanie modeli znajdywanych za pomoca AIC oraz BIC z funkcją step
+log_reg2AIC <- glm(formula = DEFAULT_FLAG ~ PRODUCT_DEMAND + OWNERS_MANAGEMENT + 
+    ACCESS_CREDIT + PROFITABILITY + GROUP_FLAG + TURNOVER + INDUSTRY + 
+    `WAS_TAKEN_IN_2008` + NUMBER_OF_LOANS, family = "binomial", 
+    data = clean_data) #regresja logistyczna za pomocą kryterium Akaike
+summary(log_reg2AIC)
+log_reg2BIC <- glm(formula = DEFAULT_FLAG ~ PRODUCT_DEMAND + OWNERS_MANAGEMENT + 
+    ACCESS_CREDIT + GROUP_FLAG + `WAS_TAKEN_IN_2008` + NUMBER_OF_LOANS, 
+    family = "binomial", data = clean_data) #regresja logistyczna za pomocą kryterium Bayesa
+summary(log_reg2BIC)
+-2*logLik(log_reg2AIC) ; -2*logLik(log_reg2BIC)
+# po przeanalizowaniu kryterium Akaike oraz wartości dewiancji, lepszym modelem jest model log_reg2AIC
 ```
 
