@@ -1,93 +1,257 @@
 ---
-title: "hsbc2"
+title: "HSBC logistic regression in credit risk"
 author: "Ola"
-date: "2025-01-01"
+date: "2025-01-15"
 output: html_document
 ---
-```{r}
+
+```{r preparing libraries}
+install.packages("detectseparation")
+install.packages("ResourceSelection")
+install.packages("lmtest")
+install.packages("pscl")
+install.packages("GGally")
+install.packages("DMwR2")
+install.packages("reticulate")
+install.packages("ROSE")
+install.packages("scorecard")
+install.packages("dplyr")
+install.packages("ggplot2")
+install.packages("MASS")
+install.packages("corrplot")
+install.packages("openxlsx")
+install.packages("car")
+install.packages("stats")
+install.packages("cowplot")
+install.packages("smotefamily")
+```
+
+```{r preparing libraries}
+library(detectseparation)
+library(ResourceSelection)
+library(lmtest)
+library(pscl)
+library(GGally)
+library(DMwR2)
+library(reticulate)
+library(ROSE)
+library(scorecard)
 library(dplyr)
 library(ggplot2)
 library(MASS)
-```
+library(corrplot)
+library(openxlsx)
+library(car)
+library(stats)
+library(cowplot)
+library(smotefamily)
+HQ_value <-function(data, model){
+  n <- nrow(data)
+  k <- length(coef(model))
+  loglik <- logLik(model)
+  return(log(n)*k-2*log(log(n))-2*loglik)
+  }#function that calculates the value for Hannan-Quinn Criterion
 
-```{r}
+```
+There are some variables which are not numeric, thus we have to factorise them in order to go further.
+There are also three observation which have "NA", and because the number is small, we might remove them from the data.
+
+```{r data transformation}
 data <- readxl::read_excel("~/Documents/studia/HSBC-Quants-final-project/DataForProject.xls")
-str(data)
+str(data) 
 clean_data <- na.omit(data)
+
+
+clean_data$GROUP_FLAG <- factor(clean_data$GROUP_FLAG)
+clean_data$DEFAULT_FLAG <- factor(clean_data$DEFAULT_FLAG)
+clean_data$INDUSTRY <- factor(clean_data$INDUSTRY)
+
+
+
+```
+```{r adding new vaiables}
 clean_data$WAS_TAKEN_IN_2008 <- ifelse(clean_data$ASSESSMENT_YEAR == "2008", 1, 0)
 clean_data <- clean_data %>%
   group_by(CUSTOMER_ID) %>%
   mutate(NUMBER_OF_LOANS = n()) %>%
   ungroup()
-#clean_data <- clean_data %>%
- # group_by(CUSTOMER_ID) %>% 
-#  mutate(NUMBER_OF_PAID = sum(DEFAULT_FLAG == 0, na.rm = TRUE)) %>% 
- # ungroup()
-#clean_data$PAID_TO_TAKEN <- clean_data$NUMBER_OF_PAID / clean_data$NUMBER_OF_LOANS
-GROUP_FLAG <- factor(clean_data$GROUP_FLAG)
-DEFAULT_FLAG <- factor(clean_data$DEFAULT_FLAG)
-WAS_TAKEN_IN_2008<- factor(clean_data$WAS_TAKEN_IN_2008)
-unique(clean_data$INDUSTRY)
+clean_data$WAS_TAKEN_IN_2008<- factor(clean_data$WAS_TAKEN_IN_2008)
+View(clean_data)
 
 ```
 
 
+```{r oversampling}
+dnd <- table(clean_data$DEFAULT_FLAG)
+proportions <- prop.table(dnd) # We observe that defaults constitute less than 10% of the entire sample, which is why we will perform oversampling.
+oversampled_data <- ovun.sample(DEFAULT_FLAG~., data=clean_data, method="over", N=8000, seed=123)
+oversampled_data <- oversampled_data$data
+unique(oversampled_data$NUMBER_OF_LOANS)
+table(oversampled_data$DEFAULT_FLAG) # Now, there is 8000 observations of which 2757 are defaults, whch is aproximately 34% od all observations
+```
+
+
 ```{r}
-log_reg1 <- glm(DEFAULT_FLAG~., data=clean_data, family="binomial")
-summary(log_reg1)
-clean_data[clean_data$ASSESSMENT_YEAR==2008 & clean_data$DEFAULT_FLAG=="1",]  #429
-clean_data[clean_data$ASSESSMENT_YEAR==2008 & clean_data$DEFAULT_FLAG=="0",] #1643
-View(clean_data)
 clean_data %>% count(clean_data$CUSTOMER_ID)
-clean_data[clean_data$CUSTOMER_ID==199609,] 
-clean_data[clean_data$CUSTOMER_ID==190937,]
 clean_data %>%
   group_by(ASSESSMENT_YEAR, DEFAULT_FLAG) %>%
   summarise(count = n(), .groups = "drop") 
+unique(clean_data$ASSESSMENT_YEAR)
 clean_data %>%
   group_by(ASSESSMENT_YEAR) %>%
   summarise(
-    total_obs = n(),                         # Całkowita liczba obserwacji w roku
-    ones_count = sum(DEFAULT_FLAG == "1"),        # Liczba jedynek dla danego roku
-    proportion_ones = ones_count / total_obs # Udział jedynek w danym roku
-  ) %>% ggplot(aes(x=ASSESSMENT_YEAR, y=proportion_ones)) + geom_col()  #dlatego właśnie wprowadziliśmy dummy 2008
-
+    total_obs = n(),                        
+    ones_count = sum(DEFAULT_FLAG == "1"),    
+    proportion_ones = ones_count / total_obs
+  ) %>%
+  ggplot(aes(x = ASSESSMENT_YEAR, y = proportion_ones)) + 
+  geom_col() +
+  labs(title = "Proportion of Defaults by Assessment Year", 
+       x = "Assessment Year", 
+       y = "Proportion of Defaults") # observation: many of the defaults happened in 2008, perhaps it was caused by the crisis in 2008, that is why we added the variable WAS_IN_2008
 ```
-```{r}
--2*logLik(log_reg1) #dewiancja wynosi 1690,916
-```
-```{r}
-stepAIC(log_reg1,direction = "both")
-```
-
-```{r}
-log_reg2 <- glm(DEFAULT_FLAG~.-ASSESSMENT_YEAR, data=clean_data, family="binomial")
-summary(log_reg2)
-step(log_reg2, direction="both")
-step(log_reg2, direction="both", k=log(nrow(clean_data)))
--2*logLik(log_reg2)
-
-```
-```{r}
-#korelacja miedzy zmiennymi
+```{r correlaion between variables: clean data}
 cor_matrix <- cor(clean_data[, sapply(clean_data, is.numeric)], use = "complete.obs")
 print(cor_matrix)
 
-# macierzy korelacji
+# matrix of correlation
 corrplot(cor_matrix, method = "circle", type = "upper", tl.col = "black")
+# heat map of correlation coefficients
+ggcorr(clean_data, label=TRUE)
 ```
+A high correlation is observed between variables such as
+1) product demand and: industry, access credit, short, medium;
+2) access credit and: profitability, short term liquidity, medium term liquidity,
+3) profitability and: short term liquidity, medium term liquidity
+```{r splitting into train and test set}
+Pro_split <- split_df(oversampled_data, y=oversampled_data$DEFAULT_FLAG, ratio=c(0.80,0.2), seed=1) 
+train_set <- Pro_split$train
+test_set <- Pro_split$test
+write.xlsx(Pro_split$train, "train_setHSBCo.xlsx")
+View(train_set)
+
+```
+
 ```{r}
-#porównanie modeli znajdywanych za pomoca AIC oraz BIC z funkcją step
-log_reg2AIC <- glm(formula = DEFAULT_FLAG ~ PRODUCT_DEMAND + OWNERS_MANAGEMENT + 
-    ACCESS_CREDIT + PROFITABILITY + GROUP_FLAG + TURNOVER + INDUSTRY + 
-    `WAS_TAKEN_IN_2008` + NUMBER_OF_LOANS, family = "binomial", 
-    data = clean_data) #regresja logistyczna za pomocą kryterium Akaike
-summary(log_reg2AIC)
-log_reg2BIC <- glm(formula = DEFAULT_FLAG ~ PRODUCT_DEMAND + OWNERS_MANAGEMENT + 
-    ACCESS_CREDIT + GROUP_FLAG + `WAS_TAKEN_IN_2008` + NUMBER_OF_LOANS, 
-    family = "binomial", data = clean_data) #regresja logistyczna za pomocą kryterium Bayesa
-summary(log_reg2BIC)
--2*logLik(log_reg2AIC) ; -2*logLik(log_reg2BIC)
-# po przeanalizowaniu kryterium Akaike oraz wartości dewiancji, lepszym modelem jest model log_reg2AIC
+lgbasic <- glm(formula =DEFAULT_FLAG~.+PRODUCT_DEMAND*INDUSTRY+PRODUCT_DEMAND*ACCESS_CREDIT+PRODUCT_DEMAND*SHORT_TERM_LIQUIDITY+PRODUCT_DEMAND*MEDIUM_TERM_LIQUIDITY+ACCESS_CREDIT*PROFITABILITY+ACCESS_CREDIT*SHORT_TERM_LIQUIDITY+ACCESS_CREDIT*MEDIUM_TERM_LIQUIDITY+PROFITABILITY*SHORT_TERM_LIQUIDITY+PROFITABILITY*MEDIUM_TERM_LIQUIDITY, data=train_set, family = "binomial")
+summary(lgbasic)
+-2*logLik(lgbasic) #deviance
+pR2(lgbasic) # pseudo R^2, McFadden Pseudo R^2
+AIC(lgbasic) #Akaike Information Criterion
+BIC(lgbasic) #Bayes Schwarz Criterion
+vif(lgbasic)
+```
+As we observe, this model has pretty satisfying parameters such as McFadden R^2, however it does not meet the conditions of logistic regression
+
+
+
+```{r best model using Akaike Criterion}
+#step(lgbasic, direction="both", trace=TRUE)
+lgAIC <- glm(formula = DEFAULT_FLAG ~ CUSTOMER_ID + PRODUCT_DEMAND + OWNERS_MANAGEMENT + 
+    ACCESS_CREDIT + PROFITABILITY + SHORT_TERM_LIQUIDITY + MEDIUM_TERM_LIQUIDITY + 
+    GROUP_FLAG + INDUSTRY + WAS_TAKEN_IN_2008 + NUMBER_OF_LOANS + 
+    PRODUCT_DEMAND:ACCESS_CREDIT + PRODUCT_DEMAND:MEDIUM_TERM_LIQUIDITY + 
+    ACCESS_CREDIT:PROFITABILITY + PROFITABILITY:SHORT_TERM_LIQUIDITY, 
+    family = "binomial", data = train_set)
+summary(lgAIC)
+pR2(lgAIC)
+vif(lgAIC)
+AIC(lgAIC)
+BIC(lgAIC)
+```
+Logistic regression assumptions:
+1) binary form of explained variable;
+2) no correlation between independent variables;
+3) linear relationship between the logit of the probability and the independent variables (the natural logarithm of the odds is linearly dependent on the explanatory variable).
+
+```{r checking logistic regression assumptions}
+vif(lgAIC) #The VIF function for more complex models does not return VIF values directly. However, it provides the GVIF value, which, when transformed using GVIF^(1/(2*df)), yields an approximate VIF coefficient.
+logit_pred <- predict(lgAIC122, type = "link")
+plot_single_variable <- function(var_name) {
+  ggplot(train_set, aes_string(x = var_name, y = "logit_pred")) +
+    geom_point(alpha = 0.6) +
+    geom_smooth(method = "loess", se = FALSE, color = "blue") +
+    labs(title = paste("Logit vs", var_name), x = var_name, y = "Logit") +
+    theme_minimal()
+}
+plot_single_variable(train_set$PRODUCT_DEMAND) # it resembles quartic function
+plot_single_variable(train_set$OWNERS_MANAGEMENT) # it resembles a quartic or quintic function, better fit was quintic function
+
+```
+
+
+```{r developing AIC, fixing vifs}
+lgAIC122 <- glm(formula = DEFAULT_FLAG ~ I(PRODUCT_DEMAND^4) + I(OWNERS_MANAGEMENT^5) + 
+    ACCESS_CREDIT + PROFITABILITY + 
+    GROUP_FLAG +  WAS_TAKEN_IN_2008 + NUMBER_OF_LOANS + 
+    PRODUCT_DEMAND:INDUSTRY + PRODUCT_DEMAND:ACCESS_CREDIT, 
+    family = "binomial", data = train_set)
+summary(lgAIC122)
+vif(lgAIC122) # variable access credit has very high coefficient GVIF, thus we will try to remove it from the model and see whether it will fix the problem with other high GVIF values
+lgAIC122ac <- glm(formula = DEFAULT_FLAG ~ I(PRODUCT_DEMAND^4) + I(OWNERS_MANAGEMENT^5) + PROFITABILITY + 
+    GROUP_FLAG +  WAS_TAKEN_IN_2008 + NUMBER_OF_LOANS + 
+    PRODUCT_DEMAND:INDUSTRY + PRODUCT_DEMAND:ACCESS_CREDIT, 
+    family = "binomial", data = train_set) # removed variable access credit
+summary(lgAIC122ac)
+vif(lgAIC122ac)
+lgAIC122pdac <- glm(formula = DEFAULT_FLAG ~ I(PRODUCT_DEMAND^4) + I(OWNERS_MANAGEMENT^5) + 
+    ACCESS_CREDIT + PROFITABILITY + 
+    GROUP_FLAG +  WAS_TAKEN_IN_2008 + NUMBER_OF_LOANS + 
+    PRODUCT_DEMAND:INDUSTRY, 
+    family = "binomial", data = train_set) # removed variable prodect_demand:access_credit
+summary(lgAIC122pdac)
+vif(lgAIC122pdac)
+#   VIF coefficients seems to have been fixed, as they are lesser than 4, looking at the AIC we will choose the lgAICpdac model
+```
+```{r lgAIC122pdac model's parameters}
+lgAIC122pdac <- glm(formula = DEFAULT_FLAG ~ I(PRODUCT_DEMAND^4) + I(OWNERS_MANAGEMENT^5) + 
+    ACCESS_CREDIT + PROFITABILITY + 
+    GROUP_FLAG +  WAS_TAKEN_IN_2008 + NUMBER_OF_LOANS + 
+    PRODUCT_DEMAND:INDUSTRY, 
+    family = "binomial", data = train_set)
+summary(lgAIC122pdac)
+vif(lgAIC122pdac)
+BIC(lgAIC122pdac) # Bayes-Schwarz Information Criterion is 1180.677 better than model's lgAICac which is 1184.351 
+AIC(lgAIC122pdac) # Akaike Information Criterion is 1059.105
+pR2(lgAIC122pdac) #McFadden R^2 is 0.87
+```
+```{r checking for perfect separation}
+
+?detect_separation
+x <- train_set[,c(1:11,13,14)]
+y <- train_set[,12]
+```
+
+```{r checking for outliners}
+plot(residuals(lgAIC122pdac, type = "deviance"))
+cooks <- cooks.distance(lgAIC122pdac)
+
+# Wyświetlenie Cook's distance dla każdej obserwacji
+plot(cooks, type = "h", main = "Cook's Distance", ylab = "Cook's Distance")
+
+# Znalezienie obserwacji z wysokimi wartościami
+influential <- which(cooks > (4 / nrow(train_set)))
+influential
+
+```
+
+
+```{r}
+predicted_data <- data.frame(probability_of_df=lgAIC122pdac$fitted.values, real_default_flag=train_set$DEFAULT_FLAG)
+predicted_data <- predicted_data[order(predicted_data$probability_of_df, decreasing = FALSE),]
+predicted_data$rank <- 1:nrow(predicted_data)
+ggplot(data=predicted_data, aes(x=predicted_data$rank, y=predicted_data$probability_of_df))+geom_point(aes(color=predicted_data$real_default_flag), alpha=1, shape=4, stroke=2)+xlab("Index")+ylab("Predicted probability of defaulting")
+```
+
+
+
+```{r best model using Bayes-Schwarz Criterion}
+#step(lgbasic, direction = "both", trace=TRUE, k=log(nrow(train_set)))
+lgBIC <- glm(formula = DEFAULT_FLAG ~ CUSTOMER_ID + PRODUCT_DEMAND + OWNERS_MANAGEMENT + 
+    ACCESS_CREDIT + PROFITABILITY + SHORT_TERM_LIQUIDITY + WAS_TAKEN_IN_2008 + 
+    NUMBER_OF_LOANS + PRODUCT_DEMAND:ACCESS_CREDIT, family = "binomial", 
+    data = train_set)
+summary(lgBIC)
+
 ```
 
